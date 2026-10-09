@@ -1,0 +1,131 @@
+================================================================
+PHASE 1 - MED: REDUNDANCY TEST
+================================================================
+Project: bgp-deep-dive
+Date: 2026-10-09
+
+----------------------------------------------------------------
+TEST SCENARIO
+----------------------------------------------------------------
+
+Simulate Link 1 failure and verify:
+1. BGP fails over to Link 2 automatically
+2. Inbound traffic (ISP → PC1) remains reachable
+3. Return path works correctly
+
+----------------------------------------------------------------
+STEP 1: VERIFY BASELINE
+----------------------------------------------------------------
+
+R-ISP# show ip bgp 192.168.100.0
+  10.0.100.1 ... metric 50 ... best   ← Link 1 preferred
+  10.0.101.1 ... metric 100 ...
+
+STATUS: ✅ Link 1 is best (MED=50)
+
+----------------------------------------------------------------
+STEP 2: SHUT DOWN LINK 1
+----------------------------------------------------------------
+
+R1-Core(config)# interface GigabitEthernet3/0
+R1-Core(config-if)# shutdown
+
+----------------------------------------------------------------
+STEP 3: OBSERVE BGP CONVERGENCE
+----------------------------------------------------------------
+
+R-ISP# show ip bgp 192.168.100.0
+Paths: (1 available, best #1, table default)
+  65001
+    10.0.101.1 from 10.0.101.1 (1.1.1.1)
+      Origin incomplete, metric 100, localpref 100, valid, external, best
+      ← ← FAILOVER: Link 2 now active! ✅
+
+STATUS: ✅ BGP failed over to Link 2 (automatic)
+
+----------------------------------------------------------------
+STEP 4: VERIFY RETURN PATH (CRITICAL!)
+----------------------------------------------------------------
+
+GOAL: R-ISP can ping PC1 (192.168.100.10) with source from Link 2.
+
+R-ISP# ping 192.168.100.10 source 10.0.101.2
+!!!!!
+Success rate is 100 percent (5/5)
+
+STATUS: ✅ Return path works!
+
+----------------------------------------------------------------
+WHY DOES RETURN PATH WORK?
+----------------------------------------------------------------
+
+Return path requires R2 (destination side) to know route to
+10.0.101.0/30 (Link 2 subnet).
+
+Chain of events (that made this work):
+
+  1. `network 10.0.101.0 mask 255.255.255.252` in BGP
+     └─ Injects prefix 10.0.101.0/30 into BGP table
+
+  2. `redistribute bgp 65001 subnets` in OSPF
+     └─ Injects prefix from BGP into OSPF domain
+
+  3. R2 learns 10.0.101.0/30 via OSPF
+     └─ Now R2 has return path to 10.0.101.2
+
+  4. R-ISP pings PC1 with source 10.0.101.2
+     └─ Return traffic: PC1 → R2 → R1-Core → R-ISP ✅
+
+KEY INSIGHT (LESSON):
+  - Redistribution between BGP ↔ OSPF is BIDIRECTIONAL
+  - Prefixes injected into BGP automatically flow to OSPF
+  - This ensures Return Path exists for all BGP link subnets
+
+----------------------------------------------------------------
+STEP 5: RESTORE LINK 1
+----------------------------------------------------------------
+
+R1-Core(config)# interface GigabitEthernet3/0
+R1-Core(config-if)# no shutdown
+R1-Core(config-if)# exit
+R1-Core(config)# exit
+
+R1-Core# clear ip bgp * soft
+
+After a few seconds:
+R-ISP# show ip bgp 192.168.100.0
+  10.0.100.1 ... metric 50 ... , best   ← ← Link 1 back! ✅
+  10.0.101.1 ... metric 100 ...
+
+STATUS: ✅ BGP re-converged to Link 1 (MED preferred)
+
+----------------------------------------------------------------
+TEST RESULT
+----------------------------------------------------------------
+
+✅ BGP Redundancy: WORKS
+   - Automatic failover on link failure
+   - Convergence within BGP hold timer (default 180s)
+
+✅ Return Path: WORKS
+   - OSPF learned BGP-injected prefixes
+   - End-to-end connectivity maintained
+
+✅ Traffic Engineering: WORKS
+   - Primary path: Link 1 (MED=50)
+   - Backup path: Link 2 (MED=100)
+
+----------------------------------------------------------------
+KEY LESSONS
+----------------------------------------------------------------
+
+1. BGP Redundancy without IGP (for Return Path) = INCOMPLETE
+2. Every BGP peering subnet MUST be advertised in IGP
+   (either directly via OSPF network or via redistribution)
+3. BGP Hold Timer default (180s) causes slow convergence
+4. Use BFD or BGP timers for faster failover (Phase 9)
+5. Asymmetric routing can cause silent failures
+   - Traceroute works but ping fails
+   - Return path must be verified separately
+================================================================
+

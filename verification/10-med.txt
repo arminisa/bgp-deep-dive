@@ -1,0 +1,132 @@
+================================================================
+PHASE 1 - BGP ATTRIBUTES: MED (Multi-Exit Discriminator)
+================================================================
+Project: bgp-deep-dive
+Date: 2026-10-09
+Router: R1-Core (AS 65001) ↔ R-ISP (AS 65002)
+
+----------------------------------------------------------------
+SCENARIO GOAL
+----------------------------------------------------------------
+
+Control inbound traffic (from ISP to R1-Core) using MED:
+- 192.168.100.0/24 → prefer Link 1 (MED=50 vs 100)
+- 192.168.200.0/24 → prefer Link 2 (MED=100 vs 50)
+
+BOTH prefixes advertised from BOTH links (Redundancy preserved!).
+Link 3 blocked for these two prefixes (everything else goes via Link 3).
+
+----------------------------------------------------------------
+CONFIGURATION HIGHLIGHTS - R1-Core
+----------------------------------------------------------------
+
+! Prefix-lists
+ip prefix-list pl-192-100 seq 5 permit 192.168.100.0/24
+ip prefix-list pl-192-200 seq 5 permit 192.168.200.0/24
+
+! Route-map for Link 1
+route-map SET-MED-LINK1 permit 10
+ match ip address prefix-list pl-192-100
+ set metric 50
+route-map SET-MED-LINK1 permit 20
+ match ip address prefix-list pl-192-200
+ set metric 100
+
+! Route-map for Link 2
+route-map SET-MED-LINK2 permit 10
+ match ip address prefix-list pl-192-200
+ set metric 50
+route-map SET-MED-LINK2 permit 20
+ match ip address prefix-list pl-192-100
+ set metric 100
+
+! Route-map for Link 3 (block the two prefixes)
+route-map SET-MED-LINK3 deny 10
+ match ip address prefix-list pl-192-100
+route-map SET-MED-LINK3 deny 20
+ match ip address prefix-list pl-192-200
+route-map SET-MED-LINK3 permit 30
+
+! Apply on BGP neighbors (OUT direction)
+router bgp 65001
+ neighbor 10.0.100.2 route-map SET-MED-LINK1 out
+ neighbor 10.0.101.2 route-map SET-MED-LINK2 out
+ neighbor 10.0.102.2 route-map SET-MED-LINK3 out
+
+----------------------------------------------------------------
+KEY CONCEPT
+----------------------------------------------------------------
+
+MED (Multi-Exit Discriminator):
+- Lower = Better (opposite of Weight/LocPrf)
+- Scope: Between two adjacent ASes
+- Direction: OUT (advertising to neighbor)
+- Default: 0
+- Advertised only to directly connected AS (not beyond)
+
+----------------------------------------------------------------
+VERIFICATION - R1-Core (what we advertise)
+----------------------------------------------------------------
+
+R1-Core# show ip bgp neighbors 10.0.100.2 advertised-routes
+   Network          Next Hop         Metric
+*> 192.168.100.0    0.0.0.0          50      ← MED=50 ✅
+*> 192.168.200.0    0.0.0.0          100     ← MED=100
+
+R1-Core# show ip bgp neighbors 10.0.101.2 advertised-routes
+   Network          Next Hop         Metric
+*> 192.168.100.0    0.0.0.0          100     ← MED=100
+*> 192.168.200.0    0.0.0.0          50      ← MED=50 ✅
+
+----------------------------------------------------------------
+VERIFICATION - R-ISP (what ISP sees)
+----------------------------------------------------------------
+
+R-ISP# show ip bgp 192.168.100.0
+BGP routing table entry for 192.168.100.0/24
+Paths: (2 available, best #1, table default)
+
+  65001
+    10.0.100.1 from 10.0.100.1 (1.1.1.1)
+      Origin incomplete, metric 50, localpref 100, valid, external, best
+      ← ← MED=50 wins (Link 1) ✅
+  65001
+    10.0.101.1 from 10.0.101.1 (1.1.1.1)
+      Origin incomplete, metric 100, localpref 100, valid, external
+      ← ← MED=100 loses (Link 2)
+
+R-ISP# show ip bgp 192.168.200.0
+BGP routing table entry for 192.168.200.0/24
+Paths: (2 available, best #2, table default)
+
+  65001
+    10.0.100.1 from 10.0.100.1 (1.1.1.1)
+      Origin incomplete, metric 100, localpref 100, valid, external
+      ← ← MED=100 loses (Link 1)
+  65001
+    10.0.101.1 from 10.0.101.1 (1.1.1.1)
+      Origin incomplete, metric 50, localpref 100, valid, external, best
+      ← ← MED=50 wins (Link 2) ✅
+
+----------------------------------------------------------------
+RESULT
+----------------------------------------------------------------
+
+✅ 192.168.100.0/24 preferred via Link 1 (MED=50 < 100)
+✅ 192.168.200.0/24 preferred via Link 2 (MED=50 < 100)
+✅ Link 3 blocked for these two prefixes
+✅ MED successfully controls inbound traffic
+✅ Redundancy preserved (both links have both prefixes)
+
+----------------------------------------------------------------
+LESSON LEARNED
+----------------------------------------------------------------
+
+1. MED uses `set metric <number>` on Route-map
+2. Lower MED = Better (opposite of Weight/LocPrf)
+3. Direction: OUT (advertising to neighbor)
+4. Direction of traffic control: INBOUND (traffic coming to us)
+5. `clear ip bgp * soft` is required after MED changes
+6. MED does NOT propagate beyond the directly connected AS
+7. Route-map implicit deny: must add final `permit` for other prefixes
+================================================================
