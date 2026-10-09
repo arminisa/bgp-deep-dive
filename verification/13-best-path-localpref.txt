@@ -1,0 +1,107 @@
+================================================================
+PHASE 2 - BEST PATH SELECTION: TEST 2 (LOCAL PREFERENCE)
+================================================================
+Project: bgp-deep-dive
+Date: 2026-10-09
+Router: R1-Core
+
+----------------------------------------------------------------
+GOAL
+----------------------------------------------------------------
+Prove that Local Preference is the SECOND attribute checked 
+in the BGP Best Path Selection Algorithm (after Weight).
+
+----------------------------------------------------------------
+BASELINE (Weight removed, all attributes equal)
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+Paths: (3 available, best #3, table default)
+  10.0.100.2 ... best    ← Link 1 wins (smallest Neighbor IP)
+  10.0.101.2 ...
+  10.0.102.2 ...
+
+All attributes equal:
+  Weight = 0, LocPrf = 100, AS-Path = 65002, MED = 0
+
+----------------------------------------------------------------
+CONFIGURATION
+----------------------------------------------------------------
+
+ip prefix-list MATCH-9 seq 5 permit 9.9.9.9/32
+
+route-map SET-LP permit 10
+ match ip address prefix-list MATCH-9
+ set local-preference 200
+route-map SET-LP permit 20
+
+router bgp 65001
+ neighbor 10.0.101.2 route-map SET-LP in
+
+clear ip bgp * soft
+
+----------------------------------------------------------------
+VERIFICATION (after LocPrf)
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+BGP routing table entry for 9.9.9.9/32
+Paths: (3 available, best #2, table default)
+
+  65002
+    10.0.102.2 from 10.0.102.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external
+  65002
+    10.0.101.2 from 10.0.101.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 200, valid, external, best
+      ← LOCPRF=200 wins!
+  65002
+    10.0.100.2 from 10.0.100.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external
+      ← previously best, now loses!
+
+----------------------------------------------------------------
+RESULT
+----------------------------------------------------------------
+✅ Local Preference beats Tie-Breaker (Neighbor IP)
+✅ Link 2 (LocPrf=200) wins over Link 1 and Link 3 (LocPrf=100)
+✅ Confirms: Local Pref is the SECOND attribute checked
+
+----------------------------------------------------------------
+BGP BEST PATH SELECTION ORDER (updated)
+----------------------------------------------------------------
+1. Weight              ✅ TESTED (Test 1)
+2. Local Preference    ✅ TESTED (Test 2)
+3. Locally Originated
+4. AS-Path
+5. Origin
+6. MED
+7. eBGP > iBGP
+8. IGP metric to Next-Hop
+9. Router ID
+10. Neighbor IP
+
+----------------------------------------------------------------
+LESSONS LEARNED
+----------------------------------------------------------------
+1. Local Preference is a standard BGP attribute (RFC 4271)
+2. Higher Local Pref = Better
+3. Default: 100
+4. Scope: Advertised to all iBGP peers within the AS
+5. Direction: IN (received routes)
+6. Requires `clear ip bgp * soft` to take effect
+7. Direction of traffic control: OUTBOUND (traffic leaving us)
+
+----------------------------------------------------------------
+COMPARISON: Weight vs Local Pref
+----------------------------------------------------------------
+| Feature       | Weight           | Local Pref       |
+|---------------|------------------|------------------|
+| Scope         | Local to router  | Whole AS         |
+| Config method | Direct on neighbor| Route-map       |
+| Prefix-list   | Not required     | Required         |
+| Advertised    | No               | Yes (iBGP)       |
+| Default       | 0 / 32768        | 100              |
+| Priority      | 1 (highest)      | 2                |
+| Cisco-only?   | Yes              | No (standard)    |
+================================================================
