@@ -1,0 +1,87 @@
+================================================================
+PHASE 2 - BEST PATH SELECTION: TEST 1 (WEIGHT)
+================================================================
+Project: bgp-deep-dive
+Date: 2026-10-09
+Router: R1-Core
+
+----------------------------------------------------------------
+GOAL
+----------------------------------------------------------------
+Prove that Weight is the FIRST attribute checked in the 
+BGP Best Path Selection Algorithm.
+
+----------------------------------------------------------------
+BASELINE (before Weight)
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+Paths: (3 available, best #3, table default)
+  10.0.100.2 ... best    ← Link 1 wins (smallest Neighbor IP)
+  10.0.101.2 ...
+  10.0.102.2 ...
+
+All attributes equal:
+  Weight = 0, LocPrf = 100, AS-Path = 65002, MED = 0
+Tie-breaker: smallest Neighbor IP (10.0.100.2)
+
+----------------------------------------------------------------
+CONFIGURATION
+----------------------------------------------------------------
+
+router bgp 65001
+ neighbor 10.0.102.2 weight 300
+
+clear ip bgp * soft
+
+----------------------------------------------------------------
+VERIFICATION (after Weight)
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+BGP routing table entry for 9.9.9.9/32
+Paths: (3 available, best #1, table default)
+
+  65002
+    10.0.102.2 from 10.0.102.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, weight 300, valid, external, best
+      ← WEIGHT=300 wins!
+  65002
+    10.0.101.2 from 10.0.101.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external
+  65002
+    10.0.100.2 from 10.0.100.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external
+      ← previously best, now loses!
+
+----------------------------------------------------------------
+RESULT
+----------------------------------------------------------------
+✅ Weight beats Tie-Breaker (Neighbor IP)
+✅ Link 3 (weight=300) wins over Link 1 and Link 2 (weight=0)
+✅ Confirms: Weight is the FIRST attribute checked
+
+----------------------------------------------------------------
+BGP BEST PATH SELECTION ORDER
+----------------------------------------------------------------
+1. Weight              ← ← FIRST (this test)
+2. Local Preference
+3. Locally Originated
+4. AS-Path
+5. Origin
+6. MED
+7. eBGP > iBGP
+8. IGP metric to Next-Hop
+9. Router ID
+10. Neighbor IP
+
+----------------------------------------------------------------
+LESSONS LEARNED
+----------------------------------------------------------------
+1. Weight is Cisco-only (not standard BGP attribute)
+2. Higher Weight = Better
+3. Scope: Local to router only (not advertised)
+4. Default: 0 for received routes, 32768 for locally originated
+5. Requires `clear ip bgp * soft` to take effect
+6. Weight has HIGHER priority than ALL other attributes
+================================================================
