@@ -1,0 +1,107 @@
+================================================================
+PHASE 2 - BEST PATH SELECTION: TEST 3 (AS-PATH)
+================================================================
+Project: bgp-deep-dive
+Date: 2026-10-09
+Router: R1-Core / R-ISP
+
+----------------------------------------------------------------
+GOAL
+----------------------------------------------------------------
+Prove that AS-Path is the THIRD attribute checked in the 
+BGP Best Path Selection Algorithm (after Weight, Local Pref).
+
+Shorter AS-Path = Better.
+
+----------------------------------------------------------------
+BASELINE
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+Paths: (3 available, best #3, table default)
+  10.0.100.2 ... AS-Path: 65002    ← best (smallest IP)
+  10.0.101.2 ... AS-Path: 65002
+  10.0.102.2 ... AS-Path: 65002
+
+All AS-Path = 65002 (equal)
+
+----------------------------------------------------------------
+CONFIGURATION - R-ISP (AS-Path Prepend on Link 1)
+----------------------------------------------------------------
+
+route-map SET-AS permit 10
+ set as-path prepend 65002 65002 65002 65002
+
+router bgp 65002
+ neighbor 10.0.100.1 route-map SET-AS out
+
+clear ip bgp * soft
+
+----------------------------------------------------------------
+VERIFICATION - R1-Core
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+BGP routing table entry for 9.9.9.9/32
+Paths: (3 available, best #1, table default)
+
+  65002 65002 65002 65002 65002
+    10.0.100.2 from 10.0.100.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external
+      ← AS-Path = 5 hops (LONG) → LOSES
+  65002
+    10.0.101.2 from 10.0.101.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external, best
+      ← AS-Path = 1 hop (SHORT) → WINS
+  65002
+    10.0.102.2 from 10.0.102.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external
+      ← AS-Path = 1 hop (SHORT) → loses (Tie-Breaker IP)
+
+----------------------------------------------------------------
+RESULT
+----------------------------------------------------------------
+✅ Link 1 loses (long AS-Path: 5 hops)
+✅ Link 2 wins (short AS-Path + smallest Tie-Breaker IP)
+✅ Confirms: shorter AS-Path = better
+
+----------------------------------------------------------------
+BGP BEST PATH SELECTION ORDER (updated)
+----------------------------------------------------------------
+1. Weight              ✅ TESTED (Test 1)
+2. Local Preference    ✅ TESTED (Test 2)
+3. Locally Originated  (skipped)
+4. AS-Path             ✅ TESTED (Test 3) ← ← YOU ARE HERE
+5. Origin
+6. MED
+7. eBGP > iBGP
+8. IGP metric to Next-Hop
+9. Router ID
+10. Neighbor IP
+
+----------------------------------------------------------------
+LESSONS LEARNED
+----------------------------------------------------------------
+1. AS-Path is a standard well-known mandatory attribute
+2. Shorter AS-Path = Better
+3. Direction: OUT (applied by the SENDER - who owns the prefix)
+4. AS-Path Prepend = repeating your own AS number
+5. Stronger than MED, weaker than Local Preference
+6. Advertised to ALL ASes (global scope)
+
+----------------------------------------------------------------
+KEY INSIGHT
+----------------------------------------------------------------
+AS-Path is controlled by the SENDER of the route:
+- In real life: ISP prepends to influence inbound traffic to themselves
+- In our test: R-ISP (who owns 9.9.9.9) prepends, R1-Core observes
+- R1-Core chooses based on shortest AS-Path
+
+----------------------------------------------------------------
+IMPORTANT NOTE
+----------------------------------------------------------------
+It doesn't matter WHICH link you prepend.
+- Prepend on Link 1 → Link 1 loses
+- Prepend on Link 2 → Link 2 loses
+- Same concept: long AS-Path = losing path
+================================================================
