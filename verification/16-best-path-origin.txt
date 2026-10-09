@@ -1,0 +1,137 @@
+================================================================
+PHASE 2 - BEST PATH SELECTION: TEST 5 (ORIGIN)
+================================================================
+Project: bgp-deep-dive
+Date: 2026-10-09
+Router: R1-Core / R-ISP
+
+----------------------------------------------------------------
+GOAL
+----------------------------------------------------------------
+Prove that Origin is the FIFTH attribute checked in the BGP 
+Best Path Selection Algorithm.
+
+Order: IGP (i) > EGP (e) > Incomplete (?)
+
+----------------------------------------------------------------
+BASELINE
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+Paths: (3 available, best #3, table default)
+  10.0.100.2 ... Origin IGP ... best   ← Link 1 (smallest IP)
+  10.0.101.2 ... Origin IGP ...
+  10.0.102.2 ... Origin IGP ...
+
+All origins = IGP (R-ISP uses `network` command)
+
+----------------------------------------------------------------
+CONFIGURATION - R-ISP
+----------------------------------------------------------------
+
+! Set Origin = Incomplete (?) on Link 1 and Link 2
+route-map SET-MED permit 10
+ set origin incomplete
+
+route-map SET-MED2 permit 10
+ set origin incomplete
+
+! Apply on two links (Link 3 keeps default Origin IGP)
+router bgp 65002
+ neighbor 10.0.100.1 route-map SET-MED out      ← Origin = "?"
+ neighbor 10.0.101.1 route-map SET-MED2 out     ← Origin = "?"
+ ! Link 3 (10.0.102.1) has NO route-map         ← Origin = "i"
+
+clear ip bgp * soft
+
+----------------------------------------------------------------
+VERIFICATION - R1-Core
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+BGP routing table entry for 9.9.9.9/32
+Paths: (3 available, best #2, table default)
+
+  65002
+    10.0.101.2 from 10.0.101.2 (9.9.9.9)
+      Origin incomplete, metric 0, localpref 100, valid, external
+      ← Origin "?" → LOSES
+  65002
+    10.0.102.2 from 10.0.102.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external, best
+      ← Origin "i" → WINS ✅
+  65002
+    10.0.100.2 from 10.0.100.2 (9.9.9.9)
+      Origin incomplete, metric 0, localpref 100, valid, external
+      ← Origin "?" → LOSES
+
+----------------------------------------------------------------
+RESULT
+----------------------------------------------------------------
+✅ Link 1 & Link 2 LOSE (Origin "?")
+✅ Link 3 WINS (Origin "i")
+✅ Confirms: IGP (i) is better than Incomplete (?)
+
+This test shows that even the "worst IP" link (Link 3 with 
+10.0.102.2) can win if its Origin is better.
+
+----------------------------------------------------------------
+ORIGIN VALUES EXPLAINED
+----------------------------------------------------------------
+| Value | Name       | Source                         | Preference |
+|-------|------------|--------------------------------|------------|
+| i     | IGP        | `network` command              | BEST       |
+| e     | EGP        | Legacy EGP protocol (obsolete) | MIDDLE     |
+| ?     | Incomplete | Redistribution                 | WORST      |
+
+----------------------------------------------------------------
+BGP BEST PATH SELECTION ORDER (updated)
+----------------------------------------------------------------
+1. Weight              ✅ TESTED (Test 1)
+2. Local Preference    ✅ TESTED (Test 2)
+3. Locally Originated  (skipped)
+4. AS-Path             ✅ TESTED (Test 3)
+5. Origin              ✅ TESTED (Test 5) ← ← YOU ARE HERE
+6. MED                 ✅ TESTED (Test 4)
+7. eBGP > iBGP
+8. IGP metric to Next-Hop
+9. Router ID
+10. Neighbor IP
+
+----------------------------------------------------------------
+LESSONS LEARNED
+----------------------------------------------------------------
+1. Origin is the 5th attribute in BGP Best Path Selection
+2. Order: IGP (i) > EGP (e) > Incomplete (?)
+3. Origin "i" comes from `network` command
+4. Origin "?" comes from redistribution
+5. Can be set manually via `set origin incomplete` in Route-map
+6. Origin beats MED (which is 6th)
+7. Origin loses to AS-Path (which is 4th)
+8. IMPORTANT: This test shows Origin alone can override 
+   the Tie-Breaker (smallest IP), because Link 3 (biggest IP) 
+   won over Link 1 (smallest IP)!
+
+----------------------------------------------------------------
+PRACTICAL NOTES
+----------------------------------------------------------------
+- In real networks, Origin rarely differs because most routes
+  come from the same source
+- But when mixing `network` and `redistribute`, Origin can differ
+- BGP prefers the "cleaner" origin (i) over the "messy" one (?)
+- This is why network command is preferred over redistribute
+  when possible (cleaner origin)
+
+----------------------------------------------------------------
+KEY INSIGHT
+----------------------------------------------------------------
+Before this test:
+  Link 1 (IP 10.0.100.2) was winning via Tie-Breaker
+
+After this test:
+  Link 3 (IP 10.0.102.2) wins because Origin "i" beats Origin "?"
+  Even though Link 3 has a LARGER IP address!
+
+This proves: Origin has HIGHER priority than Tie-Breaker (IP)
+================================================================
+
