@@ -1,0 +1,145 @@
+================================================================
+PHASE 2 - BEST PATH SELECTION: TEST 4 (MED)
+================================================================
+Project: bgp-deep-dive
+Date: 2026-10-09
+Router: R1-Core / R-ISP
+
+----------------------------------------------------------------
+GOAL
+----------------------------------------------------------------
+Prove that MED is the SIXTH attribute checked in the BGP Best 
+Path Selection Algorithm.
+
+Lower MED = Better.
+
+----------------------------------------------------------------
+BASELINE (after AS-Path Prepend removed)
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+Paths: (3 available, best #3, table default)
+  10.0.100.2 ... best    ← Link 1 wins (smallest IP)
+  10.0.101.2 ...
+  10.0.102.2 ...
+
+All MED = 0 (default), so Tie-Breaker (smallest IP) applies.
+
+----------------------------------------------------------------
+CONFIGURATION - R-ISP
+----------------------------------------------------------------
+
+! Route-map for Link 1
+route-map SET-MED permit 10
+ set metric 10
+
+! Route-map for Link 2
+route-map SET-MED2 permit 10
+ set metric 7
+
+! Apply on neighbors
+router bgp 65002
+ neighbor 10.0.100.1 route-map SET-MED out     ← MED=10
+ neighbor 10.0.101.1 route-map SET-MED2 out    ← MED=7
+ ! NOTE: Link 3 (10.0.102.1) has NO route-map
+ ! So Link 3 keeps its default MED=0
+
+clear ip bgp * soft
+
+----------------------------------------------------------------
+VERIFICATION - R1-Core
+----------------------------------------------------------------
+
+R1-Core# show ip bgp 9.9.9.9
+BGP routing table entry for 9.9.9.9/32
+Paths: (3 available, best #2, table default)
+
+  65002
+    10.0.101.2 from 10.0.101.2 (9.9.9.9)
+      Origin IGP, metric 7, localpref 100, valid, external
+      ← MED=7 (loses)
+  65002
+    10.0.102.2 from 10.0.102.2 (9.9.9.9)
+      Origin IGP, metric 0, localpref 100, valid, external, best
+      ← MED=0 (WINS!)
+  65002
+    10.0.100.2 from 10.0.100.2 (9.9.9.9)
+      Origin IGP, metric 10, localpref 100, valid, external
+      ← MED=10 (loses)
+
+----------------------------------------------------------------
+RESULT
+----------------------------------------------------------------
+✅ Link 3 wins with MED=0
+   - Because MED default = 0 (LOWEST possible value)
+   - LOWER MED = BETTER
+   - Link 3 was NOT given a route-map, so it kept the default
+✅ Confirms: LOWER MED wins
+
+----------------------------------------------------------------
+BGP BEST PATH SELECTION ORDER (updated)
+----------------------------------------------------------------
+1. Weight              ✅ TESTED (Test 1)
+2. Local Preference    ✅ TESTED (Test 2)
+3. Locally Originated  (skipped)
+4. AS-Path             ✅ TESTED (Test 3)
+5. Origin              (skipped)
+6. MED                 ✅ TESTED (Test 4) ← ← YOU ARE HERE
+7. eBGP > iBGP
+8. IGP metric to Next-Hop
+9. Router ID
+10. Neighbor IP
+
+----------------------------------------------------------------
+KEY OBSERVATION (IMPORTANT LESSON)
+----------------------------------------------------------------
+This test revealed an important MED behavior:
+
+DEFAULT MED = 0 (the LOWEST possible value!)
+
+This means:
+- If you set MED on SOME links but not others:
+  → Links WITHOUT explicit MED will have MED=0
+  → They will ALWAYS WIN (because 0 is the lowest)
+
+- To make a SPECIFIC link win with MED:
+  → You MUST set MED on ALL competing links
+  → Otherwise the "default 0" will beat your custom values
+
+----------------------------------------------------------------
+COMPARISON WITH PREVIOUS TESTS
+----------------------------------------------------------------
+| Attribute    | Who sets | Direction | Rule        | Winner    |
+|--------------|----------|-----------|-------------|-----------|
+| Weight       | Receiver | IN        | Higher      | Link 3    |
+| Local Pref   | Receiver | IN        | Higher      | Link 2    |
+| AS-Path      | Sender   | OUT       | Shorter     | Link 2    |
+| MED          | Sender   | OUT       | Lower       | Link 3    |
+              (because default 0 < 7 < 10)
+
+----------------------------------------------------------------
+LESSONS LEARNED
+----------------------------------------------------------------
+1. MED = Multi-Exit Discriminator
+2. LOWER MED = Better (opposite of Weight/LocPrf)
+3. Direction: OUT (applied by the sender)
+4. Scope: Only between two adjacent ASes
+5. Default: 0 ← ← CRITICAL: This is the LOWEST value!
+6. If you only configure MED on SOME links, the OTHERS
+   keep default 0 and will ALWAYS WIN
+7. To use MED effectively: set it on ALL links
+8. MED is weaker than AS-Path
+9. MED is stronger than eBGP/iBGP, IGP metric, Router ID, Neighbor IP
+
+----------------------------------------------------------------
+PRACTICAL TAKEAWAY
+----------------------------------------------------------------
+In real-world scenarios:
+- When using MED, ALWAYS set it on ALL links between the two ASes
+- Otherwise the default (0) on unconfigured links will win
+- Plan your MED values carefully:
+  Example:
+    Link 1 (primary):   MED = 10
+    Link 2 (backup):    MED = 50
+    Link 3 (tertiary):  MED = 100
+================================================================
