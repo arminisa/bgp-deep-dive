@@ -1,0 +1,70 @@
+============================================================
+Phase 3: iBGP Administrative Distance (AD) Conflict Resolution
+============================================================
+
+Problem:
+  External BGP routes were showing as 'r>' (RIB-failure) in the BGP table.
+  Reason: OSPF (AD=110) was preferred over iBGP (AD=200) for the same prefixes.
+
+Root Cause:
+  R1-Core redistributes BGP into OSPF (redistribute bgp 65001 subnets).
+  IOS automatically tags redistributed BGP routes with the originating AS (65002).
+  R2-iBGP learned these routes via OSPF (AD=110) and also via iBGP (AD=200).
+  OSPF won the AD comparison, so the iBGP routes were not installed in the RIB.
+
+Solution:
+  Filter out OSPF routes with tag 65002 on R2-iBGP using a route-map.
+  This prevents R2-iBGP from learning external BGP routes via OSPF.
+  The iBGP routes (AD=200) then become the only candidates and get installed.
+
+Configuration on R2-iBGP:
+  route-map RM-BGP deny 10
+   match tag 65002
+  route-map RM-BGP permit 20
+  !
+  router ospf 1
+   distribute-list route-map RM-BGP in
+
+------------------------------------------------------------
+Output: show ip bgp (on R2-iBGP) - after fix
+------------------------------------------------------------
+BGP table version is 267, local router ID is 10.10.10.10
+Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
+              r RIB-failure, S Stale, m multipath, b backup-path, f RT-Filter,
+              x best-external, a additional-path, c RIB-compressed,
+Origin codes: i - IGP, e - EGP, ? - incomplete
+RPKI validation codes: V valid, I invalid, N Not found
+
+     Network          Next Hop            Metric LocPrf Weight Path
+ *>i 9.9.9.9/32       1.1.1.1                  0    100      0 65002 i
+ *>i 10.0.0.0/30      1.1.1.1                  0    100      0 ?
+ *>i 10.0.0.4/30      1.1.1.1                  0    100      0 ?
+ *>i 10.0.0.8/30      1.1.1.1                  0    100      0 ?
+ ...
+
+------------------------------------------------------------
+Output: show ip route 9.9.9.9 (on R2-iBGP)
+------------------------------------------------------------
+Routing entry for 9.9.9.9/32
+  Known via "bgp 65001", distance 200, metric 0
+  Tag 65002, type internal
+  Last update from 1.1.1.1 00:05:12 ago
+  Routing Descriptor Blocks:
+  * 1.1.1.1, from 1.1.1.1, 00:05:12 ago
+      Route metric is 0, traffic share count is 1
+      AS Hops 1
+      Route tag 65002
+      MPLS label: none
+
+------------------------------------------------------------
+Output: ping 9.9.9.9 source 10.10.10.10 (on R2-iBGP)
+------------------------------------------------------------
+Type escape sequence to abort.
+Sending 5, 100-byte ICMP Echos to 9.9.9.9, timeout is 2 seconds:
+Packet sent with a source address of 10.10.10.10
+!!!!!
+Success rate is 100 percent (5/5), round-trip min/avg/max = 1/2/4 ms
+
+============================================================
+Conclusion: AD Conflict resolved. iBGP route installed in RIB and ping successful.
+============================================================

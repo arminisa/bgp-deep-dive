@@ -1,0 +1,33 @@
+============================================================
+Phase 3: iBGP Session Setup Verification
+============================================================
+
+Topology:
+  R1-Core (Lo0: 1.1.1.1, AS 65001)  <---- iBGP ---->  R2-iBGP (Lo0: 10.10.10.10, AS 65001)
+
+Key Configurations:
+  - R1-Core: neighbor 10.10.10.10 remote-as 65001
+  - R1-Core: neighbor 10.10.10.10 update-source Loopback0
+  - R2-iBGP: neighbor 1.1.1.1 remote-as 65001
+  - R2-iBGP: neighbor 1.1.1.1 update-source Loopback0
+
+------------------------------------------------------------
+Output: show ip bgp summary (on R2-iBGP)
+------------------------------------------------------------
+BGP router identifier 10.10.10.10, local AS number 65001
+BGP table version is 267, main routing table version 267
+26 network entries using 3744 bytes of memory
+27 path entries using 2160 bytes of memory
+6/6 BGP path/bestpath attribute entries using 864 bytes of memory
+1 BGP AS-PATH entries using 24 bytes of memory
+0 BGP route-map cache entries using 0 bytes of memory
+0 BGP filter-list cache entries using 0 bytes of memory
+BGP using 6792 total bytes of memory
+BGP activity 26/0 prefixes, 27/0 paths, scan interval 60 secs
+
+Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
+1.1.1.1         4        65001      94     129      267    0    0 01:37:46        26
+
+============================================================
+Conclusion: iBGP session is ESTABLISHED (26 prefixes received).
+============================================================

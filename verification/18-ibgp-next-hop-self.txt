@@ -1,0 +1,34 @@
+============================================================
+Phase 3: iBGP Next-Hop-Self Verification
+============================================================
+
+Problem:
+  In iBGP, the next-hop attribute is NOT changed when advertising routes
+  to an iBGP peer by default. If R1-Core advertises external routes (from AS 65002)
+  to R2-iBGP, the next-hop remains the external IP (e.g., 10.0.100.2).
+  R2-iBGP has no route to that external next-hop, so the route is unusable.
+
+Solution:
+  Configure 'neighbor <peer> next-hop-self' on R1-Core.
+  This forces R1-Core to advertise itself (1.1.1.1) as the next-hop.
+
+------------------------------------------------------------
+Output: show ip bgp 9.9.9.9/32 (on R2-iBGP)
+------------------------------------------------------------
+BGP routing table entry for 9.9.9.9/32, version 17
+Paths: (1 available, best #1, table default)
+  Not advertised to any peer
+  Refresh Epoch 1
+  65002
+    1.1.1.1 (metric 2) from 1.1.1.1 (1.1.1.1)
+      Origin IGP, metric 0, localpref 100, valid, internal, best
+      rx pathid: 0, tx pathid: 0x0
+      Updated on Oct 10 09:41:32 2026
+
+Note:
+  - Next-hop is 1.1.1.1 (R1-Core's Loopback0), NOT 10.0.100.2.
+  - This proves next-hop-self is working correctly.
+
+============================================================
+Conclusion: Next-hop-self is working as expected.
+============================================================
